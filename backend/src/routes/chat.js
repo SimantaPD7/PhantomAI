@@ -7,6 +7,16 @@ import { logger } from '../utils/logger.js';
 
 const router = express.Router();
 
+// 🔥 ADD THIS (language control)
+const systemPrompt = `
+You are PhantomAI.
+
+CRITICAL RULE:
+- Detect the user's language and reply in the EXACT same language.
+- Never switch language randomly.
+- Keep answers simple and helpful.
+`;
+
 // ─── STREAM CHAT — TRUE SSE WITH PER-CHUNK FLUSH ─────────────────────────────
 
 router.post('/stream', async (req, res) => {
@@ -18,7 +28,6 @@ router.post('/stream', async (req, res) => {
 
   const sessionId = clientSessionId || uuidv4();
 
-  // SSE headers — disable ALL buffering layers
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -26,13 +35,11 @@ router.post('/stream', async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.flushHeaders();
 
-  // Write + flush immediately — ChatGPT-like per-token delivery
   const send = (event, data) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     if (typeof res.flush === 'function') res.flush();
   };
 
-  // Keepalive ping every 15s to prevent proxy timeouts
   const keepalive = setInterval(() => {
     res.write(': ping\n\n');
     if (typeof res.flush === 'function') res.flush();
@@ -53,6 +60,8 @@ router.post('/stream', async (req, res) => {
       })),
       sessionId,
       userId,
+
+      systemPrompt, // 🔥 ONLY ADD THIS LINE
 
       onChunk: (chunk) => {
         if (!aborted) send('chunk', { content: chunk });
@@ -118,6 +127,7 @@ router.post('/stream', async (req, res) => {
   }
 });
 
+// باقي code unchanged
 router.get('/history', async (req, res) => {
   const { userId, limit = 30, skip = 0 } = req.query;
   const query = userId ? { userId } : {};
