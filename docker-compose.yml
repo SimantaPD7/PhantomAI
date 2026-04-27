@@ -1,0 +1,53 @@
+version: '3.9'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: phantomai-mongo
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: phantomai
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: phantomai-backend
+    ports:
+      - '3001:3001'
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - MONGODB_URI=mongodb://mongodb:27017/phantomai
+      - CORS_ORIGIN=*
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - mongodb
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - backend_data:/app/data
+      - backend_uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: phantomai-frontend
+    ports:
+      - '3000:3000'
+    environment:
+      # BACKEND_URL is read server-side by next.config.mjs rewrites
+      # Uses the Docker service name — never exposed to the browser
+      - BACKEND_URL=http://phantomai-backend:3001
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  backend_data:
+  backend_uploads:
