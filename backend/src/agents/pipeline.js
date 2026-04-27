@@ -255,17 +255,25 @@ async function reasoningAgent({
   memoryContext,
   longTermMemory,
   onChunk,
+  externalPrompt,
 }) {
   // Build enriched system prompt
-  let systemPrompt = PHANTOM_SYSTEM_PROMPT;
+ let systemPrompt = externalPrompt || PHANTOM_SYSTEM_PROMPT;
 
-  // ── Inject per-message language directive (highest priority) ──
-  const langHint = detectLanguageHint(userMessage);
-  if (langHint) {
-    systemPrompt = `LANGUAGE DIRECTIVE (override everything): ${langHint}
+const langHint = detectLanguageHint(userMessage);
 
-` + systemPrompt;
-  }
+if (langHint) {
+  systemPrompt += `
+
+🔥 CRITICAL LANGUAGE RULE:
+- ALWAYS reply in: ${langHint}
+- NEVER switch language
+- Keep same language as user strictly
+
+This rule OVERRIDES everything.
+
+`;
+}
 
   // ── Inject memory context (long-term preferences + semantic) ──
   if (memoryContext) {
@@ -388,6 +396,7 @@ export async function runAgentPipeline({
   onChunk,
   onPlanReady,
   onResearchDone,
+  systemprompt:externalPrompt,
 }) {
   const startTime = Date.now();
 
@@ -473,6 +482,7 @@ export async function runAgentPipeline({
     conversationHistory,
     memoryContext: memoryContextStr,
     longTermMemory,
+    externalPrompt,
     onChunk: (chunk) => {
       fullContent += chunk;
       if (onChunk) onChunk(chunk);
