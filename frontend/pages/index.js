@@ -1,3 +1,9 @@
+import dynamic from "next/dynamic";
+
+const App = dynamic(() => import("../App"), {
+  ssr: false,
+});
+
 export default function Home() {
-  return <h1>PhantomAI Frontend Working 🚀</h1>;
+  return <App />;
 }
