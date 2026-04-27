@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import { rateLimit } from 'express-rate-limit';
+
 import dotenv from 'dotenv';
 import { connectDB } from './config/database.js';
 import { logger } from './utils/logger.js';
@@ -39,9 +40,10 @@ app.use(helmet({
 }));
 
 // CORS
-const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
+const corsOrigin = process.env.CORS_ORIGIN || '*';
+
 const allowedOrigins = corsOrigin === '*'
-  ? true // allow all
+  ? true
   : corsOrigin.split(',').map(o => o.trim());
 
 app.use(cors({
@@ -74,6 +76,26 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
+
+
+// ================== 🔥 IMPORTANT ADD ==================
+// Root route (fixes "Cannot GET /")
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: '🚀 PhantomAI Backend is running',
+    endpoints: [
+      '/api/health',
+      '/api/chat',
+      '/api/memory',
+      '/api/upload',
+      '/api/search'
+    ]
+  });
+});
+// =====================================================
+
+
 // Routes
 app.use('/api/health', healthRoutes);
 app.use('/api/chat', chatRoutes);
@@ -84,34 +106,32 @@ app.use('/api/search', searchRoutes);
 // Error handler — must be last
 app.use(errorHandler);
 
-// Catch unhandled promise rejections to prevent crashes
+// Crash safety
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled promise rejection:', reason);
 });
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception:', err);
-  // Don't exit — keep the server running
 });
 
 // Start server
 async function startServer() {
   try {
-    // DB — graceful (won't crash if not configured)
     await connectDB();
 
-    // Vector DB — graceful (won't crash if transformers fail to load)
     try {
       await initVectorDB();
       logger.info('✅ Vector DB initialized');
     } catch (err) {
-      logger.warn(`⚠️  Vector DB skipped: ${err.message} (RAG/embeddings disabled)`);
+      logger.warn(`⚠️ Vector DB skipped: ${err.message}`);
     }
 
     app.listen(PORT, () => {
       logger.info(`🚀 PhantomAI Backend running on port ${PORT}`);
       logger.info(`🌍 Environment: ${process.env.NODE_ENV}`);
-      logger.info(`🤖 AI Model: openrouter/auto (flexible routing)`);
+      logger.info(`🤖 AI Model: openrouter/auto`);
     });
+
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);
