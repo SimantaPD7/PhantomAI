@@ -258,12 +258,12 @@ async function reasoningAgent({
   externalPrompt,
 }) {
   // Build enriched system prompt
- let systemPrompt = externalPrompt || PHANTOM_SYSTEM_PROMPT;
+  let systemPrompt = externalPrompt || PHANTOM_SYSTEM_PROMPT;
 
-const langHint = detectLanguageHint(userMessage);
+  const langHint = detectLanguageHint(userMessage);
 
-if (langHint) {
-  systemPrompt += `
+  if (langHint) {
+    systemPrompt += `
 
 🔥 CRITICAL LANGUAGE RULE:
 - ALWAYS reply in: ${langHint}
@@ -273,7 +273,7 @@ if (langHint) {
 This rule OVERRIDES everything.
 
 `;
-}
+  }
 
   // ── Inject memory context (long-term preferences + semantic) ──
   if (memoryContext) {
@@ -320,7 +320,7 @@ This rule OVERRIDES everything.
     plan.complexity === 'complex' ? 4000 :
     plan.complexity === 'medium' ? 2500 : 1200;
 
-  logger.debug(`Reasoning Agent: model=${aiService.getModelForTask(plan.taskType)}, maxTokens=${maxTokens}`);
+  logger.debug(`Reasoning Agent: maxTokens=${maxTokens}`);
 
   const result = await aiService.streamComplete({
     messages: [
@@ -396,7 +396,7 @@ export async function runAgentPipeline({
   onChunk,
   onPlanReady,
   onResearchDone,
-  systemprompt:externalPrompt,
+  systemprompt: externalPrompt,
 }) {
   const startTime = Date.now();
 

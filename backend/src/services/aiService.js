@@ -1,41 +1,73 @@
 import OpenAI from 'openai';
 import { logger } from '../utils/logger.js';
 
-// ─── Single flexible model via OpenRouter auto-routing ───────────────────────
-// openrouter/auto picks the best available model for each request automatically.
-// You can override per-task below if you want specific models later.
-const MODEL = 'openrouter/auto';
+// ─── Provider fallback chain ──────────────────────────────────────────────────
+// PhantomAI tries providers in order. If one has no credits / quota, it
+// automatically falls through to the next — zero manual switching needed.
+//
+//  1. OpenRouter  (paid, best quality, openrouter/auto picks the best model)
+//  2. Groq      (free via Google AI Studio — generous daily limits, no card)
+//
+// To add more providers: push an entry to PROVIDERS below.
+
+const PROVIDERS = [
+  {
+    name: 'OpenRouter',
+    envKey: 'OPENROUTER_API_KEY',
+    baseURL: 'https://openrouter.ai/api/v1',
+    model: 'openrouter/auto',
+    extraHeaders: () => ({
+      'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
+      'X-Title': process.env.APP_NAME || 'PhantomAI',
+    }),
+  },
+  {
+    name: 'Groq',
+    envKey: 'GROQ_API_KEY',
+    // Google exposes Groq via an OpenAI-compatible endpoint
+    baseURL: 'https://api.groq.com/openai/v1',
+    model: 'llama-3.3-70b-versatile',   // free tier, fast, very capable
+    extraHeaders: () => ({}),
+  },
+];
+
+// HTTP status codes / error messages that mean "out of credits / quota"
+const QUOTA_STATUSES = new Set([402, 429, 503]);
+function isQuotaError(err) {
+  const status = err?.status ?? err?.response?.status;
+  if (status && QUOTA_STATUSES.has(status)) return true;
+  const msg = (err?.message || '').toLowerCase();
+  return (
+    msg.includes('insufficient') || msg.includes('credit') ||
+    msg.includes('quota')        || msg.includes('rate limit') ||
+    msg.includes('billing')      || msg.includes('out of') ||
+    msg.includes('exceeded')
+  );
+}
 
 class AIService {
   constructor() {
-    this._client = null; // lazy — don't read env here
+    this._clients = new Map(); // provider.name → OpenAI client instance (lazy)
   }
 
-  // Client is created on first use, AFTER dotenv.config() has run
-  get client() {
-    if (!this._client) {
-      const apiKey = process.env.OPENROUTER_API_KEY;
-      if (!apiKey || apiKey.startsWith('sk-or-xxx')) {
-        throw new Error(
-          '❌ OPENROUTER_API_KEY is missing or still a placeholder.\n' +
-          '   Get one free at https://openrouter.ai and add it to backend/.env'
-        );
-      }
-      this._client = new OpenAI({
-        baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-        apiKey,
-        defaultHeaders: {
-          'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
-          'X-Title': process.env.APP_NAME || 'PhantomAI',
-        },
-      });
-    }
-    return this._client;
+  _getClient(provider) {
+    if (this._clients.has(provider.name)) return this._clients.get(provider.name);
+    const apiKey = process.env[provider.envKey];
+    if (!apiKey || apiKey.includes('xxx')) return null; // key not configured
+    const client = new OpenAI({
+      baseURL: provider.baseURL,
+      apiKey,
+      defaultHeaders: provider.extraHeaders(),
+    });
+    this._clients.set(provider.name, client);
+    return client;
   }
 
-  getModelForTask(_taskType) {
-    // All tasks use openrouter/auto — flexible, always picks best available
-    return MODEL;
+  _availableProviders() {
+    return PROVIDERS.filter(p => {
+      const key = process.env[p.envKey];
+      return key && !key.includes('xxx');
+    });
   }
 
   detectTaskType(content) {
@@ -48,70 +80,93 @@ class AIService {
     return 'default';
   }
 
-  async complete({ messages, systemPrompt, taskType, temperature = 0.7, maxTokens = 2000, stream = false }) {
-    const model = this.getModelForTask(taskType || 'default');
-    logger.debug(`Using model: ${model} for task: ${taskType}`);
+  async complete({ messages, systemPrompt, taskType, temperature = 0.7, maxTokens = 2000 }) {
+    const providers = this._availableProviders();
+    if (!providers.length) throw new Error('❌ No AI provider configured. Add OPENROUTER_API_KEY or GROQ_API_KEY to your environment.');
 
     const fullMessages = [
       { role: 'system', content: systemPrompt || PHANTOM_SYSTEM_PROMPT },
       ...messages,
     ];
 
-    const response = await this.client.chat.completions.create({
-      model,
-      messages: fullMessages,
-      temperature,
-      max_tokens: maxTokens,
-      stream,
-    });
-
-    return { response, model };
+    for (const provider of providers) {
+      const client = this._getClient(provider);
+      if (!client) continue;
+      try {
+        logger.debug(`[AIService] Trying provider: ${provider.name} (${provider.model})`);
+        const response = await client.chat.completions.create({
+          model: provider.model,
+          messages: fullMessages,
+          temperature,
+          max_tokens: maxTokens,
+        });
+        logger.info(`[AIService] ✓ ${provider.name} responded`);
+        return { response, model: provider.model, provider: provider.name };
+      } catch (err) {
+        if (isQuotaError(err)) {
+          logger.warn(`[AIService] ${provider.name} quota/credits exhausted — trying next provider`);
+          continue;
+        }
+        throw err; // real error, bubble up
+      }
+    }
+    throw new Error('❌ All AI providers exhausted. Top up credits or add GROQ_API_KEY as a free fallback.');
   }
 
   async streamComplete({ messages, systemPrompt, taskType, temperature = 0.7, maxTokens = 2000, onChunk, onDone }) {
-    const model = this.getModelForTask(taskType || 'default');
-    logger.debug(`Streaming with model: ${model}`);
+    const providers = this._availableProviders();
+    if (!providers.length) throw new Error('❌ No AI provider configured. Add OPENROUTER_API_KEY or GROQ_API_KEY to your environment.');
 
     const fullMessages = [
       { role: 'system', content: systemPrompt || PHANTOM_SYSTEM_PROMPT },
       ...messages,
     ];
 
-    let stream;
-    try {
-      stream = await this.client.chat.completions.create({
-        model,
-        messages: fullMessages,
-        temperature,
-        max_tokens: maxTokens,
-        stream: true,
-      });
-    } catch (err) {
-      logger.error('OpenRouter stream creation failed:', err.message);
-      throw new Error(`AI service error: ${err.message}`);
-    }
+    for (const provider of providers) {
+      const client = this._getClient(provider);
+      if (!client) continue;
 
-    let fullContent = '';
-    try {
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content || '';
-        if (delta) {
-          fullContent += delta;
-          if (onChunk) onChunk(delta);
+      let stream;
+      try {
+        logger.debug(`[AIService] Streaming via: ${provider.name} (${provider.model})`);
+        stream = await client.chat.completions.create({
+          model: provider.model,
+          messages: fullMessages,
+          temperature,
+          max_tokens: maxTokens,
+          stream: true,
+        });
+      } catch (err) {
+        if (isQuotaError(err)) {
+          logger.warn(`[AIService] ${provider.name} quota/credits exhausted — falling back`);
+          continue;
         }
+        throw err;
       }
-    } catch (err) {
-      logger.error('Stream read error:', err.message);
-      // Return whatever we collected before the error
-      if (fullContent) {
-        if (onDone) onDone(fullContent);
-        return { content: fullContent, model };
-      }
-      throw err;
-    }
 
-    if (onDone) onDone(fullContent);
-    return { content: fullContent, model };
+      let fullContent = '';
+      try {
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta?.content || '';
+          if (delta) {
+            fullContent += delta;
+            if (onChunk) onChunk(delta);
+          }
+        }
+        logger.info(`[AIService] ✓ ${provider.name} stream complete`);
+        if (onDone) onDone(fullContent);
+        return { content: fullContent, model: provider.model, provider: provider.name };
+      } catch (err) {
+        logger.error(`[AIService] Stream error from ${provider.name}:`, err.message);
+        if (fullContent) {
+          if (onDone) onDone(fullContent);
+          return { content: fullContent, model: provider.model, provider: provider.name };
+        }
+        if (isQuotaError(err)) continue;
+        throw err;
+      }
+    }
+    throw new Error('❌ All AI providers exhausted.');
   }
 }
 
@@ -178,4 +233,4 @@ Every response must be:
 You are PhantomAI. Begin.`;
 
 export const aiService = new AIService();
-export { MODEL };
+export const MODEL = 'openrouter/auto'; // kept for backward compat
