@@ -56,9 +56,10 @@ export default function Sidebar() {
           const active = sess.id === activeSessionId;
           return (
             <div key={sess.id} onClick={() => setActiveSession(sess.id)}
+              className="chat-item"
               style={{ display:'flex', alignItems:'flex-start', gap:9, padding:'9px 10px', borderRadius:12, cursor:'pointer', marginBottom:2, background: active ? 'rgba(124,58,237,0.11)' : 'transparent', border: `1px solid ${active ? 'rgba(124,58,237,0.28)' : 'transparent'}`, transition:'all 0.15s' }}
               onMouseEnter={e => { if (!active) e.currentTarget.style.background='rgba(255,255,255,0.04)'; }}
-              onMouseLeave={e => { if (!active) e.currentTarget.style.background='transparent'; }}>
+              onMouseLeave={e => { if (!active) e.currentTarget.style.background= active ? 'rgba(124,58,237,0.11)' : 'transparent'; }}>
               <MessageSquare size={12} style={{ color: active ? '#a78bfa' : 'rgba(255,255,255,0.2)', flexShrink:0, marginTop:2 }} />
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ fontSize:12.5, fontWeight:500, color: active ? 'var(--text)' : 'var(--muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
@@ -69,10 +70,10 @@ export default function Sidebar() {
                 </div>
               </div>
               <button onClick={e => handleDelete(e, sess.id)}
-                style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(255,255,255,0.15)', padding:4, borderRadius:6, opacity:0, transition:'opacity 0.15s', flexShrink:0 }}
+                className="del-btn"
+                style={{ background:'none', border:'none', cursor:'pointer', color:'rgba(255,255,255,0.15)', padding:4, borderRadius:6, flexShrink:0, transition:'opacity 0.15s, color 0.15s, background 0.15s' }}
                 onMouseEnter={e => { e.currentTarget.style.color='#f87171'; e.currentTarget.style.background='rgba(239,68,68,0.1)'; }}
-                onMouseLeave={e => { e.currentTarget.style.color='rgba(255,255,255,0.15)'; e.currentTarget.style.background='none'; }}
-                className="del-btn">
+                onMouseLeave={e => { e.currentTarget.style.color='rgba(255,255,255,0.15)'; e.currentTarget.style.background='none'; }}>
                 <Trash2 size={11} />
               </button>
             </div>
@@ -93,7 +94,13 @@ export default function Sidebar() {
         </div>
       </div>
 
-      <style>{`.del-btn { opacity: 0 } div:hover > div > .del-btn { opacity: 1 }`}</style>
+      <style>{`
+        .del-btn { opacity: 0; }
+        .chat-item:hover .del-btn { opacity: 1; }
+        @media (hover: none) {
+          .del-btn { opacity: 0.5; }
+        }
+      `}</style>
     </div>
   );
 }
