@@ -5,14 +5,24 @@ function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+export const THEMES = ['dark', 'light', 'frosted'];
+
 export const useChatStore = create((set, get) => ({
   sessions: [],
   activeSessionId: null,
   sidebarOpen: true,
   isStreaming: false,
   userId: null,
+  theme: 'dark',
 
   initUser: () => { if (!get().userId) set({ userId: genId() }); },
+
+  setTheme: (theme) => {
+    set({ theme });
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+  },
 
   createSession: (title = 'New Chat') => {
     const id = genId();
@@ -66,11 +76,16 @@ export const useChatStore = create((set, get) => ({
       const raw = localStorage.getItem('phantomai-v5');
       if (!raw) return;
       const saved = JSON.parse(raw);
+      const theme = saved.theme || 'dark';
+      if (typeof document !== 'undefined') {
+        document.documentElement.setAttribute('data-theme', theme);
+      }
       set({
         sessions: saved.sessions || [],
         activeSessionId: saved.activeSessionId || null,
         sidebarOpen: saved.sidebarOpen ?? true,
         userId: saved.userId || null,
+        theme,
       });
     } catch {}
   },
@@ -85,6 +100,7 @@ if (typeof window !== 'undefined') {
         activeSessionId: state.activeSessionId,
         sidebarOpen: state.sidebarOpen,
         userId: state.userId,
+        theme: state.theme,
       }));
     } catch {}
   });
